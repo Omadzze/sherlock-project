@@ -46,6 +46,12 @@ def main():
             "please run the '01-train-paragraph-vector-features' notebook before continuing."
         )
 
+        # Ensure that the processed directory exists.
+    processed_dir = '../data/data/processed'
+    if not os.path.exists(processed_dir):
+        os.makedirs(processed_dir)
+        print(f"Created directory: {processed_dir}")
+
     # Generate a timestamp string to use in output filenames.
     timestr = time.strftime("%Y%m%d-%H%M%S")
     X_test_filename_csv = f'../data/data/processed/test_{timestr}.csv'
@@ -107,6 +113,15 @@ def main():
     print(f"Load Features (validation) process took {datetime.now() - start} seconds.")
     print("Validation set preview:")
     print(X_validation.head())
+
+    # -------------------------------------------------
+    # Save preliminary backups before imputing missing (NaN) values.
+    # -------------------------------------------------
+    print("Saving backup copies of the raw processed data (pre-imputation).")
+    X_test.to_csv(f'{processed_dir}/test_preimpute_{timestr}.csv', index=False)
+    X_train.to_csv(f'{processed_dir}/train_preimpute_{timestr}.csv', index=False)
+    X_validation.to_csv(f'{processed_dir}/validation_preimpute_{timestr}.csv', index=False)
+    print("Backup copies saved.")
 
     # -------------------------------------------------
     # Impute missing (NaN) values with the mean of each feature from the training set.
