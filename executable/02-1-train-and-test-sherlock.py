@@ -17,9 +17,13 @@ import pandas as pd
 from sklearn.metrics import f1_score, classification_report
 
 from sherlock.deploy.model import SherlockModel
-
+from sherlock import helpers
 
 def main():
+
+    print("Downloading raw data and processed data")
+    # Raw data
+    helpers.download_data()
     # -------------------------------------------------------------------------
     # Set model identifier: use "retrained_sherlock" when training from scratch.
     # If you wish to use the pretrained model, adjust the code accordingly.
