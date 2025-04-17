@@ -28,13 +28,20 @@ def main():
     initialise_pretrained_model(400)
     initialise_nltk()
 
-    df = pd.read_csv("../cholera.xlsx", dtype=str)
+    df = pd.read_csv(
+        "../cholera.csv",
+        sep=';',
+        skiprows=1,
+        dtype=str
+    )
 
-    series_to_columns = df.appl(lambda col: col.dropna().tolist(), axis = 0)
+    series_of_columns = pd.Series(
+        { col: df[col].dropna().tolist() for col in df.columns }
+    )
 
     # Extract features from the data.
     # The features will be saved to a temporary CSV file.
-    extract_features("../custom-sherlock.csv", series_to_columns)
+    extract_features("../custom-sherlock.csv", series_of_columns)
     feature_vectors = pd.read_csv("../custom-sherlock.csv", dtype=np.float32)
 
     # Initialize the Sherlock model and load the weights.
@@ -43,7 +50,14 @@ def main():
 
     # Predict the semantic type for the column based on its feature vector.
     predicted_labels = model.predict(feature_vectors, "sherlock")
-    print("Predicted semantic types:", predicted_labels)
+    #print("Predicted semantic types:", predicted_labels)
+
+    results = pd.DataFrame({
+        "column": series_of_columns.index,
+        "predicted_labels": predicted_labels
+    })
+
+    print(results)
 
 if __name__ == "__main__":
     main()
