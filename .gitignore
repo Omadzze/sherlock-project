@@ -87,8 +87,8 @@ glove.6B.50d.txt*tmp
 par_vec_trained_400.pkl.docvecs.vectors_docs.npy
 data/data/
 data/work/
-data/processed
-data/raw
+data/data/processed
+data/data/raw
 data.zip
 model_files/
 data/*
