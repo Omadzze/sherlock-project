@@ -6,6 +6,7 @@ import argparse
 from ast import literal_eval
 from collections import Counter
 from datetime import datetime
+import random
 
 import numpy as np
 import pandas as pd
@@ -17,6 +18,11 @@ import tensorflow as tf
 from tensorflow.keras.layers import Dense
 from tensorflow.keras import Model
 from sherlock.deploy import helpers
+
+SEED = 13
+random.seed(SEED)
+np.random.seed(SEED)
+tf.random.set_random_seed(SEED)
 
 def num_labels():
     splits = {
@@ -184,6 +190,15 @@ def main(data_dir, model_id):
     # optional confusion matrix
     cm = confusion_matrix(y_test_int, y_pred_int)
     print("Confusion matrix shape:", cm.shape)
+
+    # inverse integers to string
+    true_names = le.inverse_transform(y_test_int)
+    pred_names = le.inverse_transform(y_pred_int)
+
+    # 1) Print a few sample-level results
+    print("\nSample-level True vs. Predicted:")
+    for i, (t, p) in enumerate(zip(true_names, pred_names)):
+        print(f"  [{i:4d}] True: {t:20s}  Pred: {p}")
 
 
 
