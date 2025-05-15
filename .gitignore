@@ -127,7 +127,7 @@ venv.bak/
 # MAC OS
 .DS_Store
 
-*.parquet
+
 tmp
 wheel
 /sherlock/features/*.npy

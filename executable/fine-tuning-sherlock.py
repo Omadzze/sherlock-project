@@ -63,27 +63,20 @@ def main(data_dir, model_id):
     X_train = pd.read_parquet(f"{data_dir}/processed/train.parquet")
     y_train = pd.read_parquet(f"{data_dir}/raw/train_labels.parquet").values.flatten()
     y_train = np.array([x.lower() for x in y_train])
-    #print(f"Load data (train) process took {datetime.now() - start} seconds.")
-
-    # Check data types
-    #print("Distinct types for columns in the DataFrame (should be all float32):")
-    #print(set(X_train.dtypes))
 
     # Load validation data
-    start = datetime.now()
-    #print(f"Started at {start}")
     X_validation = pd.read_parquet(f"{data_dir}/processed/validation.parquet")
     y_validation = pd.read_parquet(f"{data_dir}/raw/validation_labels.parquet").values.flatten()
     y_validation = np.array([x.lower() for x in y_validation])
-    #print(f"Load data (validation) process took {datetime.now() - start} seconds.")
 
     # Load test data
-    start = datetime.now()
-    #print(f"Started at {start}")
     X_test = pd.read_parquet(f"{data_dir}/processed/test.parquet")
     y_test = pd.read_parquet(f"{data_dir}/raw/test_labels.parquet").values.flatten()
     y_test = np.array([x.lower() for x in y_test])
-    #print(f"Finished at {datetime.now()}, took {datetime.now() - start} seconds")
+
+    X_test_synthetic = pd.read_parquet(f"{data_dir}/processed/test_synthetic.parquet")
+    y_test_synthetic  = pd.read_parquet(f"{data_dir}/raw/test_synthetic_labels.parquet").values.flatten()
+    y_test_synthetic = np.array([x.lower() for x in y_test_synthetic])
 
     # Initialize and load the fine-tuned model
     wrapper = SherlockModel()
@@ -120,18 +113,26 @@ def main(data_dir, model_id):
     # process data
     train_inputs = make_inputs(X_train)
     val_inputs = make_inputs(X_validation)
-    test_inputs = make_inputs(X_test)
+    # original data
+    #test_inputs = make_inputs(X_test)
+    # synthetic test data
+    test_inputs = make_inputs(X_test_synthetic)
 
     # keep only labels that exist in both train and test
-    mask = np.isin(y_test, le.classes_)     # boolean mask the same length as y_test
+    #original data
+    #mask = np.isin(y_test, le.classes_)     # boolean mask the same length as y_test
+    #synthetic data
+    mask = np.isin(y_test_synthetic, le.classes_)
+
     print("Kept rows:", mask.sum(), " / ", len(mask))
 
     test_inputs = [arr[mask] for arr in test_inputs]   # slice every branch
 
     # keep only rows whose label exists in the encoder
-    y_test_int = le.transform(y_test[mask])
-
-
+    # original data
+    #y_test_int = le.transform(y_test[mask])
+    # synthetic data
+    y_test_int = le.transform(y_test_synthetic[mask])
 
     # encode string labels to integers
     y_train_int = le.transform(y_train)
