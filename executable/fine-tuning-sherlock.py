@@ -24,6 +24,78 @@ random.seed(SEED)
 np.random.seed(SEED)
 tf.random.set_random_seed(SEED)
 
+LABEL_MAP = {
+    # Date
+    "Vaccination_date": "date",
+    "Date_report":"date",
+    "Date_onset":  "date",
+    "Date_confirmation": "date",
+    "Date_of_first_consultation":"date",
+    "Date_hospitalisation":  "date",
+    "Date_discharge_hospital": "date",
+    "Date_admission_ICU":   "date",
+    "Date_discharge_ICU":  "date",
+    "Date_isolation":  "date",
+    "Date_death":  "date",
+    "Date_recovered":  "date",
+    "Travel_history_entry": "date",
+    "Travel_history_start":  "date",
+    "Date_entry":  "date",
+    "Date_last_modified": "date",
+
+    # ID
+    "Contact_ID": "id",
+    "ID": "id",
+
+    #Gender
+    "Gender": "gender",
+    "Sex_at_birth": "gender",
+    "Gender_other": "gender",
+    "Sex_at_birth_other": "gender",
+
+    #Location
+    "Travel_history_location": "location",
+    "Location_information": "location",
+
+    # Contact setting
+    "Contact_setting": "contact_setting",
+    "Contact_setting_other": "contact_setting",
+
+    # demographic
+    "Race": "demographic",
+    "Nationality": "demographic",
+    "Ehtnicity": "demographic",
+    "Occupation": "demographic",
+
+    # Medical Boolean
+    "Healthcare_worker": "medical_boolean",
+    "Previous_infection": "medical_boolean",
+    "Pregnancy_Status": "medical_boolean",
+    "Vaccination":  "medical_boolean",
+    "Hospitalised":  "medical_boolean",
+    "Intensive_care":  "medical_boolean",
+    "Home_monitoring":  "medical_boolean",
+    "Isolated": "medical_boolean",
+    "Contact_with_case": "medical_boolean",
+    "Travel_history": "medical_boolean",
+
+    # Sourec
+    "Source": "source",
+    "Source_II": "source",
+    "Source_III": "source",
+    "Source_IV": "source",
+}
+
+LABEL_MAP_LC = {k.lower(): v.lower() for k, v in LABEL_MAP.items()}
+
+def remap_labels(arr, mapping=LABEL_MAP_LC):
+    """
+    • forces each element to lower-case
+    • replaces it if the key exists in `mapping`
+    • otherwise leaves it as lower-case original
+    """
+    return np.array([mapping.get(x.lower(), x.lower()) for x in arr])
+
 def num_labels():
     splits = {
         "train": Path("/content/sherlock-project/custom_data/raw/train_labels.parquet"),
@@ -59,24 +131,45 @@ def main(data_dir, model_id):
     start = datetime.now()
     print(f"Started at {start}")
 
+    #Traning
+    #{data_dir}/processed/train.parquet
+    #{data_dir}/raw/train_labels.parquet
+
+    #Test (real)
+    #{data_dir}/processed/test.parquet
+    #{data_dir}/raw/test_labels.parquet
+
+    #Synthetic
+    #{data_dir}/processed/test_synthetic.parquet
+    #{data_dir}/raw/test_synthetic_labels.parquet
+
     # Load training data
     X_train = pd.read_parquet(f"{data_dir}/processed/train.parquet")
     y_train = pd.read_parquet(f"{data_dir}/raw/train_labels.parquet").values.flatten()
+    y_train = remap_labels(y_train)
     y_train = np.array([x.lower() for x in y_train])
 
     # Load validation data
     X_validation = pd.read_parquet(f"{data_dir}/processed/validation.parquet")
     y_validation = pd.read_parquet(f"{data_dir}/raw/validation_labels.parquet").values.flatten()
+    y_validation = remap_labels(y_validation)
     y_validation = np.array([x.lower() for x in y_validation])
 
     # Load test data
     X_test = pd.read_parquet(f"{data_dir}/processed/test.parquet")
     y_test = pd.read_parquet(f"{data_dir}/raw/test_labels.parquet").values.flatten()
+    y_test = remap_labels(y_test)
     y_test = np.array([x.lower() for x in y_test])
 
-    X_test_synthetic = pd.read_parquet(f"{data_dir}/processed/test_synthetic.parquet")
-    y_test_synthetic  = pd.read_parquet(f"{data_dir}/raw/test_synthetic_labels.parquet").values.flatten()
+    X_test_synthetic = pd.read_parquet(f"{data_dir}/processed/test.parquet")
+    y_test_synthetic  = pd.read_parquet(f"{data_dir}/raw/test_labels.parquet").values.flatten()
+    y_test_synthetic = remap_labels(y_test_synthetic)
     y_test_synthetic = np.array([x.lower() for x in y_test_synthetic])
+
+    # Encode labels
+    le = LabelEncoder().fit(y_train)
+    # number of classes in train
+    NUM_LABELS = len(le.classes_)
 
     # Initialize and load the fine-tuned model
     wrapper = SherlockModel()
@@ -86,19 +179,10 @@ def main(data_dir, model_id):
     # Tune last dense layer fc
     penultimate = base_model.get_layer("dense_7").output
 
-    # Encode labels
-    le = LabelEncoder().fit(y_train)
-    # number of classes in train
-    NUM_LABELS = len(le.classes_)
-
     # attach new classifier head
     logits = Dense(NUM_LABELS, activation="softmax", name = "classifier")(penultimate)
 
     finetune_model = Model(inputs = base_model.input, outputs = logits, name="sherlock_finetune")
-
-    # freeze all original layers
-    for layer in finetune_model.layers:
-        layer.trainable = layer.name in {"classifier"}
 
 
     finetune_model.compile(
@@ -134,9 +218,14 @@ def main(data_dir, model_id):
     # synthetic data
     y_test_int = le.transform(y_test_synthetic[mask])
 
+    # keep only existing rows for the validation data
+    mask_valid = np.isin(y_validation, le.classes_)
+
+    val_inputs = [arr[mask_valid] for arr in val_inputs]
+
     # encode string labels to integers
     y_train_int = le.transform(y_train)
-    y_val_int = le.transform(y_validation)
+    y_val_int = le.transform(y_validation[mask_valid])
 
 
     # assert to check whether data is float32
@@ -156,7 +245,7 @@ def main(data_dir, model_id):
         validation_data=(val_inputs, y_val_int),
         epochs=80,
         #class_weight=class_weights_dict,   # optional, for imbalance
-        callbacks=[tf.keras.callbacks.EarlyStopping(patience=20, restore_best_weights=True)],
+        callbacks=[tf.keras.callbacks.EarlyStopping(patience=5, restore_best_weights=True)],
     )
 
     # saving weights
@@ -176,14 +265,15 @@ def main(data_dir, model_id):
     macro_f1 = f1_score(y_test_int, y_pred_int, average="macro")
     print(f"Macro-F1: {macro_f1:.4f}")
 
-    all_ids = np.arange(NUM_LABELS)
+    present = np.unique(np.concatenate([y_test_int, y_pred_int]))
+    present_names = le.inverse_transform(present)
 
     # per-class precision / recall / F1
     print(classification_report(
         y_test_int,
         y_pred_int,
-        labels=all_ids,
-        target_names=le.classes_,  # human-readable names
+        labels=present,
+        target_names=present_names,  # human-readable names
         digits=3,
         zero_division = 0
     ))
