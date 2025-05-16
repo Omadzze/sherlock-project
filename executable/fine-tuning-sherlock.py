@@ -63,9 +63,7 @@ LABEL_MAP = {
 
     # demographic
     "Race": "demographic",
-    "Nationality": "demographic",
     "Ehtnicity": "demographic",
-    "Occupation": "demographic",
 
     # Medical Boolean
     "Healthcare_worker": "medical_boolean",
