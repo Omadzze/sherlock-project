@@ -262,8 +262,11 @@ def main(data_dir, model_id):
     y_pred_int   = y_pred_probs.argmax(axis=1)
 
     # overall macro-F1
+    weighted_f1 = f1_score(y_test_int, y_pred_int, average="weighted")
     macro_f1 = f1_score(y_test_int, y_pred_int, average="macro")
-    print(f"Macro-F1: {macro_f1:.4f}")
+
+    print(f"Macro-F1   (unweighted) : {macro_f1:.4f}")
+    print(f"Weighted F1 (support-avg): {weighted_f1:.4f}")
 
     present = np.unique(np.concatenate([y_test_int, y_pred_int]))
     present_names = le.inverse_transform(present)
