@@ -76,6 +76,8 @@ LABEL_MAP = {
     "Isolated": "medical_boolean",
     "Contact_with_case": "medical_boolean",
     "Travel_history": "medical_boolean",
+    "Contact_animal": "medical_boolean",
+
 
     # Sourec
     "Source": "source",
