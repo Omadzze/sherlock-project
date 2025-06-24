@@ -3,6 +3,7 @@
 Script for loading data and initializing the Sherlock fine-tuned model.
 """
 import argparse
+import time
 from ast import literal_eval
 from collections import Counter
 from datetime import datetime
@@ -96,26 +97,6 @@ def remap_labels(arr, mapping=LABEL_MAP_LC):
     """
     return np.array([mapping.get(x.lower(), x.lower()) for x in arr])
 
-def num_labels():
-    splits = {
-        "train": Path("/content/sherlock-project/custom_data/raw/train_labels.parquet"),
-        "val":   Path("/content/sherlock-project/custom_data/raw/validation_labels.parquet"),
-        "test":  Path("/content/sherlock-project/custom_data/raw/test_labels.parquet"),
-    }
-
-    all_labels = set()
-    for name, fp in splits.items():
-        df = pd.read_parquet(fp)
-        vc = df["type"].value_counts()
-        print(f"\n== {name.upper()} ({len(df)} rows) ==")
-        print(vc.sort_index())
-        all_labels |= set(vc.index)
-
-    #print(f"\nTOTAL UNIQUE LABELS ACROSS SPLITS: {len(all_labels)}")
-    print(sorted(all_labels))
-
-    #return len(all_labels)
-
 def make_inputs(df):
     feature_cols = helpers.categorize_features()
 
@@ -127,22 +108,6 @@ def make_inputs(df):
     ]
 
 def main(data_dir, model_id):
-    # Log start time
-    start = datetime.now()
-    print(f"Started at {start}")
-
-    #Traning
-    #{data_dir}/processed/train.parquet
-    #{data_dir}/raw/train_labels.parquet
-
-    #Test (real)
-    #{data_dir}/processed/test.parquet
-    #{data_dir}/raw/test_labels.parquet
-
-    #Synthetic
-    #{data_dir}/processed/test_synthetic.parquet
-    #{data_dir}/raw/test_synthetic_labels.parquet
-
     # Load training data
     X_train = pd.read_parquet(f"{data_dir}/processed/train.parquet")
     y_train = pd.read_parquet(f"{data_dir}/raw/train_labels.parquet").values.flatten()
@@ -157,14 +122,9 @@ def main(data_dir, model_id):
 
     # Load test data
     X_test = pd.read_parquet(f"{data_dir}/processed/test.parquet")
-    y_test = pd.read_parquet(f"{data_dir}/raw/test_labels.parquet").values.flatten()
+    y_test  = pd.read_parquet(f"{data_dir}/raw/test_labels.parquet").values.flatten()
     y_test = remap_labels(y_test)
     y_test = np.array([x.lower() for x in y_test])
-
-    X_test_synthetic = pd.read_parquet(f"{data_dir}/processed/test.parquet")
-    y_test_synthetic  = pd.read_parquet(f"{data_dir}/raw/test_labels.parquet").values.flatten()
-    y_test_synthetic = remap_labels(y_test_synthetic)
-    y_test_synthetic = np.array([x.lower() for x in y_test_synthetic])
 
     # Encode labels
     le = LabelEncoder().fit(y_train)
@@ -197,26 +157,17 @@ def main(data_dir, model_id):
     # process data
     train_inputs = make_inputs(X_train)
     val_inputs = make_inputs(X_validation)
-    # original data
-    #test_inputs = make_inputs(X_test)
-    # synthetic test data
-    test_inputs = make_inputs(X_test_synthetic)
+    test_inputs = make_inputs(X_test)
 
     # keep only labels that exist in both train and test
-    #original data
-    #mask = np.isin(y_test, le.classes_)     # boolean mask the same length as y_test
-    #synthetic data
-    mask = np.isin(y_test_synthetic, le.classes_)
+    mask = np.isin(y_test, le.classes_)
 
     print("Kept rows:", mask.sum(), " / ", len(mask))
 
     test_inputs = [arr[mask] for arr in test_inputs]   # slice every branch
 
     # keep only rows whose label exists in the encoder
-    # original data
-    #y_test_int = le.transform(y_test[mask])
-    # synthetic data
-    y_test_int = le.transform(y_test_synthetic[mask])
+    y_test_int = le.transform(y_test[mask])
 
     # keep only existing rows for the validation data
     mask_valid = np.isin(y_validation, le.classes_)
@@ -232,22 +183,22 @@ def main(data_dir, model_id):
     for name, arr in zip(["char","word","par","rest"], train_inputs):
         assert arr.dtype == np.float32, f"{name} slice is {arr.dtype}"
 
-    # TODO: Solve problem with num_classes since now it's different
     print("Classes:", le.classes_)      # ['age', 'city', 'pre_existing_condition', ...]
     print("num_classes:", NUM_LABELS)  # e.g. 20
     print("y_train_int shape:", y_train_int.shape)   # (195,)
     print("train_inputs[0].dtype:", train_inputs[0].dtype)  # float32
 
-    # Training
-
+    # Fine-tuning
+    train_start = time.perf_counter()
     finetune_model.fit(
         train_inputs, y_train_int,
         validation_data=(val_inputs, y_val_int),
-        epochs=80,
-        #class_weight=class_weights_dict,   # optional, for imbalance
+        epochs=20,
         callbacks=[tf.keras.callbacks.EarlyStopping(patience=5, restore_best_weights=True)],
     )
 
+    train_end = time.perf_counter()
+    print(f"Fine-tuning time: {train_end - train_start:.2f}s")
     # saving weights
     finetune_model.save_weights("my_custom_sherlock_head.h5")
 
@@ -257,9 +208,14 @@ def main(data_dir, model_id):
     # load weights
     finetune_model.load_weights("my_custom_sherlock_head.h5")
 
+    infer_start = time.perf_counter()
+
     # raw logits → predicted class indices
     y_pred_probs = finetune_model.predict(test_inputs, batch_size=256)
     y_pred_int   = y_pred_probs.argmax(axis=1)
+
+    infer_end = time.perf_counter()
+    print(f"Inference time: {infer_end - infer_start:.2f}s")
 
     # overall macro-F1
     weighted_f1 = f1_score(y_test_int, y_pred_int, average="weighted")
