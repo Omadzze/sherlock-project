@@ -134,3 +134,5 @@ wheel
 /sherlock/features/*.npy*tmp
 *.csv
 model_files/
+none_data/
+executable/my_custom_sherlock_head.h5
