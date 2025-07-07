@@ -201,6 +201,17 @@ def main(data_dir, model_id):
     print(f"Fine-tuning time: {train_end - train_start:.2f}s")
     # saving weights
     finetune_model.save_weights("my_custom_sherlock_head.h5")
+    
+    new_id = "sherlock_fine_tuned"
+    model_dir = "../model_files/"
+
+    # save JSON
+    model_json = finetune_model.to_json()
+    with open(f"{model_dir}/{new_id}_model.json", "w") as f:
+        f.write(model_json)
+
+    # save weights under the same id
+    finetune_model.save_weights(f"{model_dir}/{new_id}_weights.h5")
 
 
     # Testing the model!

@@ -133,3 +133,4 @@ wheel
 /sherlock/features/*.npy
 /sherlock/features/*.npy*tmp
 *.csv
+model_files/
