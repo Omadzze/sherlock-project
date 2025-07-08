@@ -35,10 +35,68 @@ HOLDOUT_CLASSES = [
     "symptoms",
 ]
 
-# Original label mapping (use your full mapping here)
+# Original label mapping
 LABEL_MAP = {
-    # ... existing mapping ...
+    # Date
+    "Vaccination_date": "date",
+    "Date_report": "date",
+    "Date_onset":  "date",
+    "Date_confirmation": "date",
+    "Date_of_first_consultation": "date",
+    "Date_hospitalisation":  "date",
+    "Date_discharge_hospital": "date",
+    "Date_admission_ICU":   "date",
+    "Date_discharge_ICU":  "date",
+    "Date_isolation":  "date",
+    "Date_death":  "date",
+    "Date_recovered":  "date",
+    "Travel_history_entry": "date",
+    "Travel_history_start":  "date",
+    "Date_entry":  "date",
+    "Date_last_modified": "date",
+
+    # ID
+    "Contact_ID": "id",
+    "ID": "id",
+
+    # Gender
+    "Gender": "gender",
+    "Sex_at_birth": "gender",
+    "Gender_other": "gender",
+    "Sex_at_birth_other": "gender",
+
+    # Location
+    "Travel_history_location": "location",
+    "Location_information": "location",
+
+    # Contact setting
+    "Contact_setting": "contact_setting",
+    "Contact_setting_other": "contact_setting",
+
+    # Demographic
+    "Race": "demographic",
+    "Ehtnicity": "demographic",
+
+    # Medical Boolean
+    "Healthcare_worker": "medical_boolean",
+    "Previous_infection": "medical_boolean",
+    "Pregnancy_Status": "medical_boolean",
+    "Vaccination":  "medical_boolean",
+    "Hospitalised":  "medical_boolean",
+    "Intensive_care":  "medical_boolean",
+    "Home_monitoring":  "medical_boolean",
+    "Isolated": "medical_boolean",
+    "Contact_with_case": "medical_boolean",
+    "Travel_history": "medical_boolean",
+    "Contact_animal": "medical_boolean",
+
+    # Source
+    "Source": "source",
+    "Source_II": "source",
+    "Source_III": "source",
+    "Source_IV": "source",
 }
+
 LABEL_MAP_LC = {k.lower(): v.lower() for k, v in LABEL_MAP.items()}
 
 
@@ -77,14 +135,14 @@ def main(data_dir, model_id):
     X_val, y_val = filter_holdout(X_val, y_val)
 
     # --- Load and filter test data ---
-    X_test = pd.read_parquet(f"{data_dir}/processed/test.parquet")
+    X_test_raw = pd.read_parquet(f"{data_dir}/processed/test.parquet")
     y_test = pd.read_parquet(f"{data_dir}/raw/test_labels.parquet").values.flatten()
     y_test = remap_labels(y_test)
     y_test = np.array([x.lower() for x in y_test])
     #X_test, y_test = filter_holdout(X_test, y_test)
 
     mask_holdout = ~np.isin(y_test, HOLDOUT_CLASSES)
-    X_test, y_test = filter_holdout(X_test, y_test)
+    X_test, y_test = filter_holdout(X_test_raw, y_test)
 
     # Encode labels
     le = LabelEncoder().fit(y_train)
@@ -162,25 +220,13 @@ def main(data_dir, model_id):
     #mask_holdout = ~np.isin(y_test, HOLDOUT_CLASSES)
 
     raw_df = pd.read_parquet(os.path.join(data_dir, "raw", "test_data.parquet"))
+    print("Raw test data before holdout: ", raw_df.shape[0])
     # Load raw inputs for display and align with holdout
     raw_df = raw_df.iloc[np.where(mask_holdout)[0]].reset_index(drop=True)
     raw_inputs = raw_df["values"].astype(str).tolist()
-
-    # Remap and lowercase raw labels to filter holdout
-    #raw_df['remapped_label'] = remap_labels(raw_df[human_col].astype(str).tolist())
-    #raw_df['remapped_label'] = raw_df['remapped_label'].str.lower()
-    # Filter out holdout classes to match X_test/y_test
-    #raw_df = raw_df[~raw_df['remapped_label'].isin(HOLDOUT_CLASSES)].reset_index(drop=True)
-    # Now extract human-readable inputs aligned with filtered test set
-    #raw_inputs = raw_df[human_col].astype(str).tolist()
-
     print("Classes:", le.classes_)      # ['age', 'city', 'pre_existing_condition', ...]
     print("num_classes:", num_labels)  # e.g. 20
-    #print("y_train_int shape:", y_train_int.shape)   # (195,)
-    #print("train_inputs[0].dtype:", train_inputs[0].dtype)  # float32
-    print("Before holdout test: ", X_test.shape)
-    print("After holdout test: ", X_test[mask].shape)
-    #print("Raw input test shape:", raw_df.shape)
+    print("After holdout test: ", X_test.shape[0])
 
     # Display inputs vs predictions
     print("\nSample-level Input vs Predicted:")
