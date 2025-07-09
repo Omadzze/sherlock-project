@@ -25,11 +25,11 @@ np.random.seed(SEED)
 tf.random.set_random_seed(SEED)
 
 # Classes to hold out (never seen during training/validation/testing)
-HOLDOUT_CLASSES = [
-    "contact_setting",
-    "occupation",
-    "symptoms",
-]
+#holdout_classes = [
+#    "contact_setting",
+#    "occupation",
+#    "symptoms",
+#]
 
 UNKNOWN_LABEL = "unknown"
 
@@ -96,6 +96,7 @@ LABEL_MAP = {
 }
 
 LABEL_MAP_LC = {k.lower(): v.lower() for k, v in LABEL_MAP.items()}
+MODEL_ID = "sherlock"
 
 
 def remap_labels(arr, mapping=LABEL_MAP_LC):
@@ -113,7 +114,7 @@ def make_inputs(df):
 
 
 
-def main(data_dir, model_id):
+def main(data_dir, holdout_classes):
     # --- Load and label training data ---
     X_train = pd.read_parquet(f"{data_dir}/processed/train.parquet")
     y_train = pd.read_parquet(f"{data_dir}/raw/train_labels.parquet").values.flatten()
@@ -121,7 +122,7 @@ def main(data_dir, model_id):
     y_train = np.array([lbl.lower() for lbl in y_train])
     # mark holdout classes as unknown
     y_train = np.array([
-        UNKNOWN_LABEL if lbl in HOLDOUT_CLASSES else lbl
+        UNKNOWN_LABEL if lbl in holdout_classes else lbl
         for lbl in y_train
     ])
 
@@ -131,7 +132,7 @@ def main(data_dir, model_id):
     y_val = remap_labels(y_val)
     y_val = np.array([lbl.lower() for lbl in y_val])
     y_val = np.array([
-        UNKNOWN_LABEL if lbl in HOLDOUT_CLASSES else lbl
+        UNKNOWN_LABEL if lbl in holdout_classes else lbl
         for lbl in y_val
     ])
 
@@ -141,7 +142,7 @@ def main(data_dir, model_id):
     y_test = remap_labels(y_test_original)
     y_test = np.array([lbl.lower() for lbl in y_test])
     y_test = np.array([
-        UNKNOWN_LABEL if lbl in HOLDOUT_CLASSES else lbl
+        UNKNOWN_LABEL if lbl in holdout_classes else lbl
         for lbl in y_test
     ])
 
@@ -152,7 +153,7 @@ def main(data_dir, model_id):
 
     # Initialize base model
     wrapper = SherlockModel()
-    wrapper.initialize_model_from_json(with_weights=True, model_id=model_id)
+    wrapper.initialize_model_from_json(with_weights=True, model_id=MODEL_ID)
     base_model = wrapper.model
 
     # Build fine-tune head
@@ -193,9 +194,9 @@ def main(data_dir, model_id):
     # Save model artifacts
     finetune_model.save_weights("my_custom_sherlock_head.h5")
     model_dir = "../model_files/"
-    with open(f"{model_dir}/{model_id}_model.json", "w") as f:
+    with open(f"{model_dir}/{MODEL_ID}_model.json", "w") as f:
         f.write(finetune_model.to_json())
-    finetune_model.save_weights(f"{model_dir}/{model_id}_weights.h5")
+    finetune_model.save_weights(f"{model_dir}/{MODEL_ID}_weights.h5")
 
     # Inference
     start_inf = time.perf_counter()
@@ -222,7 +223,7 @@ def main(data_dir, model_id):
         print(f"INPUT: {inp}")
         print(f"Predicted: {pred}\n")
 
-    save_unknown_parquets(raw_df, y_test, y_test_original,  "../custom_data", "../temprorary")
+    save_unknown_parquets(raw_df, y_test, y_test_original,  "../custom_data", "../custom_data/label_generation")
 
 
 
@@ -260,8 +261,8 @@ def save_unknown_parquets(raw_df: pd.DataFrame,
     df_data = raw_df.loc[mask_unknown, ['values']].copy()
     # reset_index to turn the original index into a column
     df_data = df_data.reset_index().rename(columns={'index': '__index_level_0__'})
-    intest_path = os.path.join(temp_dir, 'test_data_generation.parquet')
-    df_data.to_parquet(intest_path, index=False)
+    test_generation_path = os.path.join(temp_dir, 'test_data_generation.parquet')
+    df_data.to_parquet(test_generation_path, index=False)
 
     # --- Prepare and save train_labels.parquet ---
     # Build a Series of original labels indexed by the same index
@@ -269,17 +270,19 @@ def save_unknown_parquets(raw_df: pd.DataFrame,
     df_labels = orig_series.loc[mask_unknown].reset_index().rename(
         columns={'index': '__index_level_0__', 'type': 'type'}
     )
-    labels_path = os.path.join(temp_dir, 'test_labels_generation.parquet')
-    df_labels.to_parquet(labels_path, index=False)
+    labels_generation_path = os.path.join(temp_dir, 'test_labels_generation.parquet')
+    df_labels.to_parquet(labels_generation_path, index=False)
 
     print(f"Saved {mask_unknown.sum()} unknown examples:")
-    print(f"  - data -> {intest_path}")
-    print(f"  - labels -> {labels_path}")
+    print(f"  - data -> {test_generation_path}")
+    print(f"  - labels -> {labels_generation_path}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Run Sherlock fine-tuned model without threshold and display raw inputs")
-    parser.add_argument("--data_dir", type=str, default="../custom_data")
-    parser.add_argument("--model_id", type=str, default="sherlock")
+        description="Run Sherlock fine-tuned model for semantic label generation task")
+    parser.add_argument("--data_dir", type=str, default="../custom_data", help="Data directory, where all your data is located, processed and raw.")
+    parser.add_argument("--holdout_classes", nargs="*", default=[],
+                   help="list of labels to mask as 'unknown'. E.g [symptoms, location]")
+
     args = parser.parse_args()
-    main(args.data_dir, args.model_id)
+    main(args.data_dir, args.holdout_classes)
