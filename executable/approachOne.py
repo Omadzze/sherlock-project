@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Script for loading data, initializing the Sherlock fine-tuned model,
-and applying confidence thresholding, class holdout, and displaying raw inputs.
+and displaying raw inputs without applying a confidence threshold.
 """
 import argparse
 import os
@@ -24,16 +24,14 @@ random.seed(SEED)
 np.random.seed(SEED)
 tf.random.set_random_seed(SEED)
 
-# Confidence threshold for predictions
-THRESHOLD = 0.5
-UNKNOWN_LABEL = 'unknown'
-
 # Classes to hold out (never seen during training/validation/testing)
 HOLDOUT_CLASSES = [
     "contact_setting",
     "occupation",
     "symptoms",
 ]
+
+UNKNOWN_LABEL = "unknown"
 
 # Original label mapping
 LABEL_MAP = {
@@ -114,40 +112,43 @@ def make_inputs(df):
     ]
 
 
-def filter_holdout(X_df, y_arr):
-    mask = ~np.isin(y_arr, HOLDOUT_CLASSES)
-    return X_df[mask], y_arr[mask]
-
 
 def main(data_dir, model_id):
-    # --- Load and filter training data ---
+    # --- Load and label training data ---
     X_train = pd.read_parquet(f"{data_dir}/processed/train.parquet")
     y_train = pd.read_parquet(f"{data_dir}/raw/train_labels.parquet").values.flatten()
     y_train = remap_labels(y_train)
-    y_train = np.array([x.lower() for x in y_train])
-    X_train, y_train = filter_holdout(X_train, y_train)
+    y_train = np.array([lbl.lower() for lbl in y_train])
+    # mark holdout classes as unknown
+    y_train = np.array([
+        UNKNOWN_LABEL if lbl in HOLDOUT_CLASSES else lbl
+        for lbl in y_train
+    ])
 
-    # --- Load and filter validation data ---
+    # --- Load and label validation data ---
     X_val = pd.read_parquet(f"{data_dir}/processed/validation.parquet")
     y_val = pd.read_parquet(f"{data_dir}/raw/validation_labels.parquet").values.flatten()
     y_val = remap_labels(y_val)
-    y_val = np.array([x.lower() for x in y_val])
-    X_val, y_val = filter_holdout(X_val, y_val)
+    y_val = np.array([lbl.lower() for lbl in y_val])
+    y_val = np.array([
+        UNKNOWN_LABEL if lbl in HOLDOUT_CLASSES else lbl
+        for lbl in y_val
+    ])
 
-    # --- Load and filter test data ---
-    X_test_raw = pd.read_parquet(f"{data_dir}/processed/test.parquet")
+    # --- Load and label test data ---
+    X_test = pd.read_parquet(f"{data_dir}/processed/test.parquet")
     y_test = pd.read_parquet(f"{data_dir}/raw/test_labels.parquet").values.flatten()
     y_test = remap_labels(y_test)
-    y_test = np.array([x.lower() for x in y_test])
-    #X_test, y_test = filter_holdout(X_test, y_test)
+    y_test = np.array([lbl.lower() for lbl in y_test])
+    y_test = np.array([
+        UNKNOWN_LABEL if lbl in HOLDOUT_CLASSES else lbl
+        for lbl in y_test
+    ])
 
-    mask_holdout = ~np.isin(y_test, HOLDOUT_CLASSES)
-    X_test, y_test = filter_holdout(X_test_raw, y_test)
-
-    # Encode labels
+    # Encode labels (including 'unknown')
     le = LabelEncoder().fit(y_train)
     class_names = le.classes_
-    num_labels = len(le.classes_)
+    num_labels = len(class_names)
 
     # Initialize base model
     wrapper = SherlockModel()
@@ -164,12 +165,15 @@ def main(data_dir, model_id):
         metrics=["accuracy"],
     )
 
+    # Prepare integer labels
+    y_train_int = le.transform(y_train)
+    y_val_int   = le.transform(y_val)
+    y_test_int  = le.transform(y_test)
+
     # Prepare inputs
     train_inputs = make_inputs(X_train)
-    val_inputs = make_inputs(X_val)
-    test_inputs = make_inputs(X_test)
-    y_train_int = le.transform(y_train)
-    y_val_int = le.transform(y_val)
+    val_inputs   = make_inputs(X_val)
+    test_inputs  = make_inputs(X_test)
 
     # Fine-tuning
     start = time.perf_counter()
@@ -181,7 +185,12 @@ def main(data_dir, model_id):
     )
     print(f"Fine-tuning completed in {time.perf_counter() - start:.2f}s")
 
-    # Save model
+    print("Classes:", le.classes_)      # ['age', 'city', 'pre_existing_condition', ...]
+    print("num_classes:", num_labels)  # e.g. 20
+    print("y_train_int shape:", y_train_int.shape)   # (195,)
+    print("train_inputs[0].dtype:", train_inputs[0].dtype)  # float32
+
+    # Save model artifacts
     finetune_model.save_weights("my_custom_sherlock_head.h5")
     model_dir = "../model_files/"
     with open(f"{model_dir}/{model_id}_model.json", "w") as f:
@@ -193,54 +202,29 @@ def main(data_dir, model_id):
     y_pred_probs = finetune_model.predict(test_inputs, batch_size=256)
     print(f"Inference completed in {time.perf_counter() - start_inf:.2f}s")
 
-    # Top-3 predictions
-    top3_idx = np.argsort(y_pred_probs, axis=1)[:, -3:][:, ::-1]
-    y_top3_labels = [[class_names[i] for i in row] for row in top3_idx]
-    y_top3_probs = [row[idxs] for row, idxs in zip(y_pred_probs, top3_idx)]
+    # Predicted labels based on highest probability
+    y_pred_idx    = np.argmax(y_pred_probs, axis=1)
+    y_pred_labels = [class_names[i] for i in y_pred_idx]
 
-    # Thresholded predictions
-    max_probs = np.max(y_pred_probs, axis=1)
-    y_pred_idx = np.argmax(y_pred_probs, axis=1)
-    y_pred_labels = [class_names[i] if p >= THRESHOLD else UNKNOWN_LABEL
-                     for i, p in zip(y_pred_idx, max_probs)]
-
-    # Evaluate confident only
-    mask = np.array(y_pred_labels) != UNKNOWN_LABEL
-    y_t_conf = le.transform(y_test[mask])
-    y_p_conf = y_pred_idx[mask]
-    present = np.unique(np.concatenate([y_t_conf, y_p_conf]))
+    # Evaluation
     print(classification_report(
-        y_t_conf, y_p_conf,
-        labels=present, target_names=class_names[present],
+        y_test_int, y_pred_idx,
+        target_names=class_names,
         digits=3, zero_division=0
     ))
-    print("Confusion matrix shape:", confusion_matrix(y_t_conf, y_p_conf, labels=present).shape)
+    print("Confusion matrix shape:", confusion_matrix(y_test_int, y_pred_idx).shape)
 
-    # --- after you have X_test, y_test, and have done:
-    #mask_holdout = ~np.isin(y_test, HOLDOUT_CLASSES)
-
-    raw_df = pd.read_parquet(os.path.join(data_dir, "raw", "test_data.parquet"))
-    print("Raw test data before holdout: ", raw_df.shape[0])
-    # Load raw inputs for display and align with holdout
-    raw_df = raw_df.iloc[np.where(mask_holdout)[0]].reset_index(drop=True)
+    # Display raw test inputs vs predictions
+    raw_df     = pd.read_parquet(os.path.join(data_dir, "raw", "test_data.parquet"))
     raw_inputs = raw_df["values"].astype(str).tolist()
-    print("Classes:", le.classes_)      # ['age', 'city', 'pre_existing_condition', ...]
-    print("num_classes:", num_labels)  # e.g. 20
-    print("After holdout test: ", X_test.shape[0])
-
-    # Display inputs vs predictions
     print("\nSample-level Input vs Predicted:")
-    for inp, pred, top_lbls, top_prs in zip(raw_inputs, y_pred_labels, y_top3_labels, y_top3_probs):
+    for inp, pred in zip(raw_inputs, y_pred_labels[:len(raw_inputs)]):
         print(f"INPUT: {inp}")
-        print(f"Predicted: {pred}")
-        print("Top-3 predictions:")
-        for l, p in zip(top_lbls, top_prs):
-            print(f"  {l}: {p:.4f}")
-        print()
+        print(f"Predicted: {pred}\n")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Run Sherlock fine-tuned model with threshold and holdout and raw-input display")
+        description="Run Sherlock fine-tuned model without threshold and display raw inputs")
     parser.add_argument("--data_dir", type=str, default="../custom_data")
     parser.add_argument("--model_id", type=str, default="sherlock")
     args = parser.parse_args()
