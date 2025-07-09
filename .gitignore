@@ -136,3 +136,5 @@ wheel
 model_files/
 none_data/
 executable/my_custom_sherlock_head.h5
+
+temprorary/

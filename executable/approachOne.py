@@ -137,8 +137,8 @@ def main(data_dir, model_id):
 
     # --- Load and label test data ---
     X_test = pd.read_parquet(f"{data_dir}/processed/test.parquet")
-    y_test = pd.read_parquet(f"{data_dir}/raw/test_labels.parquet").values.flatten()
-    y_test = remap_labels(y_test)
+    y_test_original = pd.read_parquet(f"{data_dir}/raw/test_labels.parquet").values.flatten()
+    y_test = remap_labels(y_test_original)
     y_test = np.array([lbl.lower() for lbl in y_test])
     y_test = np.array([
         UNKNOWN_LABEL if lbl in HOLDOUT_CLASSES else lbl
@@ -221,6 +221,60 @@ def main(data_dir, model_id):
     for inp, pred in zip(raw_inputs, y_pred_labels[:len(raw_inputs)]):
         print(f"INPUT: {inp}")
         print(f"Predicted: {pred}\n")
+
+    save_unknown_parquets(raw_df, y_test, y_test_original,  "../custom_data", "../temprorary")
+
+
+
+def save_unknown_parquets(raw_df: pd.DataFrame,
+                          masked_labels: np.ndarray,
+                          original_labels: np.ndarray,
+                          data_dir: str,
+                          temp_dir: str = None):
+    """
+    Extracts all examples whose masked_labels == UNKNOWN_LABEL, and writes out
+    two parquet files in the same format as 'intest_data.parquet' and
+    'train_labels.parquet', preserving the original row index as "__index_level_0__".
+
+    Parameters
+    ----------
+    raw_df : pd.DataFrame
+        The raw data DataFrame (must contain a 'values' column), indexed by the original row IDs.
+    masked_labels : np.ndarray
+        1-D array of labels after marking holdouts as UNKNOWN_LABEL.
+    original_labels : np.ndarray
+        1-D array of the true labels before masking, aligned with raw_df.
+    data_dir : str
+        Base data directory (used only to locate default temp dir).
+    temp_dir : str, optional
+        Directory to write the parquet files. If None, defaults to os.path.join(data_dir, 'temp').
+    """
+    if temp_dir is None:
+        temp_dir = os.path.join(data_dir, 'temp')
+    os.makedirs(temp_dir, exist_ok=True)
+
+    # Boolean mask for the rows to extract
+    mask_unknown = (masked_labels == UNKNOWN_LABEL)
+
+    # --- Prepare and save intest_data.parquet ---
+    df_data = raw_df.loc[mask_unknown, ['values']].copy()
+    # reset_index to turn the original index into a column
+    df_data = df_data.reset_index().rename(columns={'index': '__index_level_0__'})
+    intest_path = os.path.join(temp_dir, 'test_data_generation.parquet')
+    df_data.to_parquet(intest_path, index=False)
+
+    # --- Prepare and save train_labels.parquet ---
+    # Build a Series of original labels indexed by the same index
+    orig_series = pd.Series(original_labels, index=raw_df.index, name='type')
+    df_labels = orig_series.loc[mask_unknown].reset_index().rename(
+        columns={'index': '__index_level_0__', 'type': 'type'}
+    )
+    labels_path = os.path.join(temp_dir, 'test_labels_generation.parquet')
+    df_labels.to_parquet(labels_path, index=False)
+
+    print(f"Saved {mask_unknown.sum()} unknown examples:")
+    print(f"  - data -> {intest_path}")
+    print(f"  - labels -> {labels_path}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
