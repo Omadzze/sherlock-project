@@ -113,8 +113,41 @@ def make_inputs(df):
     ]
 
 
+def save_metrics(name: str, raw_report, y_true, run_id: int, inference_time, out_dir):
 
-def main(data_dir, holdout_classes):
+    run_name = f"{name}-run-{run_id}"
+
+    n = len(y_true)
+
+    # 2. flatten into a single dict
+    flat = {}
+    for label, metrics in raw_report.items():
+        if label == "accuracy":
+            flat["accuracy"] = metrics
+        else:
+            for metric_name, val in metrics.items():
+                # replace any dashes so your CSV columns are valid identifiers
+                clean_metric = metric_name.replace("-", "_")
+                flat[f"{label}_{clean_metric}"] = val
+
+
+    flat["total_entries"] = n
+    flat["run_name"]      = run_name
+    flat["inference_time"] = f"{inference_time:.2f}s"
+
+
+    df = pd.DataFrame([flat])
+    metrics_csv = os.path.join(out_dir, f"{name}-metrics.csv")
+
+    # only write header if file doesn’t exist
+    if not os.path.isfile(metrics_csv):
+        df.to_csv(metrics_csv, index=False, float_format="%.4f")
+    else:
+        df.to_csv(metrics_csv, mode="a", header=False, index=False, float_format="%.4f")
+
+
+
+def main(data_dir, holdout_classes, run_id, out_dir):
     # --- Load and label training data ---
     X_train = pd.read_parquet(f"{data_dir}/processed/train.parquet")
     y_train = pd.read_parquet(f"{data_dir}/raw/train_labels.parquet").values.flatten()
@@ -201,18 +234,31 @@ def main(data_dir, holdout_classes):
     # Inference
     start_inf = time.perf_counter()
     y_pred_probs = finetune_model.predict(test_inputs, batch_size=256)
-    print(f"Inference completed in {time.perf_counter() - start_inf:.2f}s")
+    end_inf = time.perf_counter()
+
+    inference_time = end_inf-start_inf
+
+    print(f"Inference completed in {inference_time:.2f}s")
 
     # Predicted labels based on highest probability
     y_pred_idx    = np.argmax(y_pred_probs, axis=1)
     y_pred_labels = [class_names[i] for i in y_pred_idx]
 
     # Evaluation
-    print(classification_report(
+    print((classification_report(
         y_test_int, y_pred_idx,
         target_names=class_names,
-        digits=3, zero_division=0
-    ))
+        digits=3, zero_division=0)))
+
+    raw_report = classification_report(
+        y_test_int, y_pred_idx,
+        target_names=class_names,
+        output_dict=True,
+        zero_division=0
+    )
+
+    save_metrics("Sherlock", raw_report, y_test, run_id,  inference_time, out_dir)
+
     print("Confusion matrix shape:", confusion_matrix(y_test_int, y_pred_idx).shape)
 
     # Display raw test inputs vs predictions
@@ -283,6 +329,8 @@ if __name__ == "__main__":
     parser.add_argument("--data_dir", type=str, default="../custom_data", help="Data directory, where all your data is located, processed and raw.")
     parser.add_argument("--holdout_classes", nargs="*", default=[],
                    help="list of labels to mask as 'unknown'. E.g [symptoms, location]")
+    parser.add_argument("--run_id", type=int, default=1,)
+    parser.add_argument("--out_dir", type=str, default="")
 
     args = parser.parse_args()
-    main(args.data_dir, args.holdout_classes)
+    main(args.data_dir, args.holdout_classes, args.run_id, args.out_dir)
