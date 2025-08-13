@@ -1,4 +1,6 @@
-#!/usr/bin/env python3
+from collections import Counter
+
+2#!/usr/bin/env python3
 """
 Script for loading data, initializing the Sherlock fine-tuned model,
 and displaying raw inputs without applying a confidence threshold.
@@ -10,7 +12,7 @@ import random
 
 import numpy as np
 import pandas as pd
-from sklearn.metrics import classification_report, confusion_matrix
+from sklearn.metrics import classification_report, confusion_matrix, f1_score
 
 from sherlock.deploy.model import LabelEncoder, SherlockModel
 import tensorflow as tf
@@ -30,6 +32,7 @@ tf.random.set_random_seed(SEED)
 #    "occupation",
 #    "symptoms",
 #]
+SHERLOCK_MODE = "train-scratch"
 
 UNKNOWN_LABEL = "unknown"
 
@@ -184,92 +187,99 @@ def main(data_dir, holdout_classes, run_id, out_dir):
     class_names = le.classes_
     num_labels = len(class_names)
 
-    # Initialize base model
-    wrapper = SherlockModel()
-    wrapper.initialize_model_from_json(with_weights=True, model_id=MODEL_ID)
-    base_model = wrapper.model
+    # This needed to train sherlock from scratch, otherwise write just "fine-tune"
+    if SHERLOCK_MODE == "train-scratch":
+        training_scratch(X_train, y_train, X_val, y_val, X_test, y_test, run_id, out_dir, data_dir)
 
-    # Build fine-tune head
-    penultimate = base_model.get_layer("dense_7").output
-    logits = Dense(len(class_names), activation="softmax", name="classifier")(penultimate)
-    finetune_model = Model(inputs=base_model.input, outputs=logits)
-    finetune_model.compile(
-        optimizer=tf.keras.optimizers.Adam(learning_rate=3e-4),
-        loss="sparse_categorical_crossentropy",
-        metrics=["accuracy"],
-    )
+    else:
 
-    # Prepare integer labels
-    y_train_int = le.transform(y_train)
-    y_val_int   = le.transform(y_val)
-    y_test_int  = le.transform(y_test)
+        # Initialize base model
+        wrapper = SherlockModel()
+        wrapper.initialize_model_from_json(with_weights=True, model_id=MODEL_ID)
+        base_model = wrapper.model
 
-    # Prepare inputs
-    train_inputs = make_inputs(X_train)
-    val_inputs   = make_inputs(X_val)
-    test_inputs  = make_inputs(X_test)
+        # Build fine-tune head
+        penultimate = base_model.get_layer("dense_7").output
+        logits = Dense(len(class_names), activation="softmax", name="classifier")(penultimate)
+        finetune_model = Model(inputs=base_model.input, outputs=logits)
+        finetune_model.compile(
+            optimizer=tf.keras.optimizers.Adam(learning_rate=5e-4),
+            loss="sparse_categorical_crossentropy",
+            metrics=["accuracy"],
+        )
 
-    # Fine-tuning
-    start = time.perf_counter()
-    finetune_model.fit(
-        train_inputs, y_train_int,
-        validation_data=(val_inputs, y_val_int),
-        epochs=20,
-        callbacks=[tf.keras.callbacks.EarlyStopping(patience=5, restore_best_weights=True)],
-    )
-    print(f"Fine-tuning completed in {time.perf_counter() - start:.2f}s")
+        # Prepare integer labels
+        y_train_int = le.transform(y_train)
+        y_val_int = le.transform(y_val)
+        y_test_int = le.transform(y_test)
 
-    print("Classes:", le.classes_)      # ['age', 'city', 'pre_existing_condition', ...]
-    print("num_classes:", num_labels)  # e.g. 20
-    print("y_train_int shape:", y_train_int.shape)   # (195,)
-    print("train_inputs[0].dtype:", train_inputs[0].dtype)  # float32
+        # Prepare inputs
+        train_inputs = make_inputs(X_train)
+        val_inputs = make_inputs(X_val)
+        test_inputs = make_inputs(X_test)
 
-    # Save model artifacts
-    finetune_model.save_weights("my_custom_sherlock_head.h5")
-    model_dir = "../model_files/"
-    with open(f"{model_dir}/{MODEL_ID}_model.json", "w") as f:
-        f.write(finetune_model.to_json())
-    finetune_model.save_weights(f"{model_dir}/{MODEL_ID}_weights.h5")
+        # Fine-tuning
+        start = time.perf_counter()
+        finetune_model.fit(
+            train_inputs, y_train_int,
+            validation_data=(val_inputs, y_val_int),
+            epochs=100,
+            callbacks=[tf.keras.callbacks.EarlyStopping(patience=5, restore_best_weights=True, monitor="val_loss")],
+        )
 
-    # Inference
-    start_inf = time.perf_counter()
-    y_pred_probs = finetune_model.predict(test_inputs, batch_size=256)
-    end_inf = time.perf_counter()
+        print(f"Fine-tuning completed in {time.perf_counter() - start:.2f}s")
 
-    inference_time = end_inf-start_inf
+        print("Classes:", le.classes_)  # ['age', 'city', 'pre_existing_condition', ...]
+        print("num_classes:", num_labels)  # e.g. 20
+        print("y_train_int shape:", y_train_int.shape)  # (195,)
+        print("train_inputs[0].dtype:", train_inputs[0].dtype)  # float32
 
-    print(f"Inference completed in {inference_time:.2f}s")
+        # Save model artifacts
+        finetune_model.save_weights("my_custom_sherlock_head.h5")
+        model_dir = "../model_files/"
+        with open(f"{model_dir}/{MODEL_ID}_model.json", "w") as f:
+            f.write(finetune_model.to_json())
+        finetune_model.save_weights(f"{model_dir}/{MODEL_ID}_weights.h5")
 
-    # Predicted labels based on highest probability
-    y_pred_idx    = np.argmax(y_pred_probs, axis=1)
-    y_pred_labels = [class_names[i] for i in y_pred_idx]
+        # Inference
+        start_inf = time.perf_counter()
+        y_pred_probs = finetune_model.predict(test_inputs, batch_size=256)
+        end_inf = time.perf_counter()
 
-    # Evaluation
-    print((classification_report(
-        y_test_int, y_pred_idx,
-        target_names=class_names,
-        digits=3, zero_division=0)))
+        inference_time = end_inf - start_inf
 
-    raw_report = classification_report(
-        y_test_int, y_pred_idx,
-        target_names=class_names,
-        output_dict=True,
-        zero_division=0
-    )
+        print(f"Inference completed in {inference_time:.2f}s")
 
-    save_metrics("Sherlock", raw_report, y_test, run_id,  inference_time, out_dir)
+        # Predicted labels based on highest probability
+        y_pred_idx = np.argmax(y_pred_probs, axis=1)
+        y_pred_labels = [class_names[i] for i in y_pred_idx]
 
-    print("Confusion matrix shape:", confusion_matrix(y_test_int, y_pred_idx).shape)
+        # Evaluation
+        print((classification_report(
+            y_test_int, y_pred_idx,
+            target_names=class_names,
+            digits=3, zero_division=0)))
 
-    # Display raw test inputs vs predictions
-    raw_df     = pd.read_parquet(os.path.join(data_dir, "raw", "test_data.parquet"))
-    raw_inputs = raw_df["values"].astype(str).tolist()
-    print("\nSample-level Input vs Predicted:")
-    for inp, pred in zip(raw_inputs, y_pred_labels[:len(raw_inputs)]):
-        print(f"INPUT: {inp}")
-        print(f"Predicted: {pred}\n")
+        raw_report = classification_report(
+            y_test_int, y_pred_idx,
+            target_names=class_names,
+            output_dict=True,
+            zero_division=0
+        )
 
-    save_unknown_parquets(raw_df, y_test, y_test_original,  "../custom_data", "../custom_data/label_generation")
+        save_metrics("Sherlock", raw_report, y_test, run_id, inference_time, out_dir)
+
+        print("Confusion matrix shape:", confusion_matrix(y_test_int, y_pred_idx).shape)
+
+        # Display raw test inputs vs predictions
+        raw_df = pd.read_parquet(os.path.join(data_dir, "raw", "test_data.parquet"))
+        raw_inputs = raw_df["values"].astype(str).tolist()
+        print("\nSample-level Input vs Predicted:")
+        for inp, pred in zip(raw_inputs, y_pred_labels[:len(raw_inputs)]):
+            print(f"INPUT: {inp}")
+            print(f"Predicted: {pred}\n")
+
+        save_unknown_parquets(raw_df, y_test, y_test_original, "../custom_data", "../custom_data/label_generation")
 
 
 
@@ -322,6 +332,100 @@ def save_unknown_parquets(raw_df: pd.DataFrame,
     print(f"Saved {mask_unknown.sum()} unknown examples:")
     print(f"  - data -> {test_generation_path}")
     print(f"  - labels -> {labels_generation_path}")
+
+
+def training_scratch(X_train, y_train, X_val, y_val, X_test, y_test, run_id, out_dir, data_dir):
+        # Initialize base model
+        wrapper = SherlockModel()
+        wrapper.initialize_model_from_json(with_weights=True, model_id="sherlock")
+
+        # Learn from scratch
+        wrapper.fit(X_train, y_train, X_val, y_val, model_id="retrained_sherlock")
+
+        print("Trained and saved new model")
+        wrapper.store_weights(model_id="retrained_sherlock")
+
+        start_inf = time.perf_counter()
+        predicted_labels = wrapper.predict(X_test, model_id="retrained_sherlock")
+        end_inf = time.perf_counter()
+
+        inference_time = end_inf - start_inf
+
+        predicted_labels = np.array([x.lower() for x in predicted_labels])
+
+        print(f"Inference completed in {inference_time:.2f}s")
+        size = len(y_test)
+        f1_score(y_test[:size], predicted_labels[:size], average="weighted")
+
+        classes = np.load(f"../model_files/classes_retrained_sherlock.npy", allow_pickle=True)
+
+        report = classification_report(y_test, predicted_labels, output_dict=True)
+
+        class_scores = list(
+            filter(lambda x: isinstance(x, tuple) and isinstance(x[1], dict) and 'f1-score' in x[1] and x[0] in classes,
+                   list(report.items())))
+
+        class_scores = sorted(class_scores, key=lambda item: item[1]['f1-score'], reverse=True)
+
+        # Top 5 types
+        print(f"\t\tf1-score\tprecision\trecall\t\tsupport")
+
+        for key, value in class_scores[0:5]:
+            if len(key) >= 8:
+                tabs = '\t' * 1
+            else:
+                tabs = '\t' * 2
+
+            print(
+                f"{key}{tabs}{value['f1-score']:.3f}\t\t{value['precision']:.3f}\t\t{value['recall']:.3f}\t\t{value['support']}")
+
+        # Top 5 bottom types
+        print(f"\t\tf1-score\tprecision\trecall\t\tsupport")
+
+        for key, value in class_scores[len(class_scores) - 5:len(class_scores)]:
+            if len(key) >= 8:
+                tabs = '\t' * 1
+            else:
+                tabs = '\t' * 2
+
+            print(
+                f"{key}{tabs}{value['f1-score']:.3f}\t\t{value['precision']:.3f}\t\t{value['recall']:.3f}\t\t{value['support']}")
+
+        # all scores
+        print(classification_report(y_test, predicted_labels, digits=3))
+
+        raw_report = classification_report(y_test, predicted_labels, output_dict=True, zero_division=0)
+        save_metrics("Sherlock-scratch-training", raw_report, y_test, run_id, inference_time, out_dir)
+
+        print("Confusion matrix shape:", confusion_matrix(y_test, predicted_labels).shape)
+
+        raw_df = pd.read_parquet(os.path.join(data_dir, "raw", "test_data.parquet"))
+        raw_inputs = raw_df["values"].astype(str).tolist()
+        print("\nSample-level Input vs Predicted:")
+        for inp, pred in zip(raw_inputs, predicted_labels[:len(raw_inputs)]):
+            print(f"INPUT: {inp}")
+            print(f"Predicted: {pred}\n")
+
+        # review errors
+        size = len(y_test)
+        mismatches = list()
+
+        for idx, k1 in enumerate(y_test[:size]):
+            k2 = predicted_labels[idx]
+
+            if k1 != k2:
+                mismatches.append(k1)
+
+                # zoom in to specific errors. Use the index in the next step
+                if k1 in ('address'):
+                    print(f'[{idx}] expected "{k1}" but predicted "{k2}"')
+
+        f1 = f1_score(y_test[:size], predicted_labels[:size], average="weighted")
+        print(f'Total mismatches: {len(mismatches)} (F1 score: {f1})')
+
+        data = Counter(mismatches)
+        data.most_common()  # Returns all unique items and their counts
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
