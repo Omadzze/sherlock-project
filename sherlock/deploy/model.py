@@ -56,7 +56,7 @@ class SherlockModel:
         y_train_cat = tf.keras.utils.to_categorical(y_train_int)
         y_val_cat = tf.keras.utils.to_categorical(y_val_int)
 
-        callbacks = [EarlyStopping(monitor="val_loss", patience=10)]
+        callbacks = [EarlyStopping(monitor="val_loss", patience=20)]
 
         char_model_input, char_model = self._build_char_submodel(X_train_char.shape[1])
         word_model_input, word_model = self._build_word_submodel(X_train_word.shape[1])
@@ -98,7 +98,7 @@ class SherlockModel:
             ),
             callbacks=callbacks,
             epochs=200,
-            batch_size=256,
+            batch_size=32,
         )
 
         self.model = model
