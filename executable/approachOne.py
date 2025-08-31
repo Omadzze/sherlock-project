@@ -27,6 +27,13 @@ from tensorflow.keras.layers import Dense
 from tensorflow.keras import Model
 from sherlock.deploy import helpers
 
+from tensorflow.keras.callbacks import CSVLogger
+
+
+import matplotlib
+matplotlib.use("Agg")
+
+import matplotlib.pyplot as plt
 # ---------------------------
 # Configuration / Toggles
 # ---------------------------
@@ -319,6 +326,13 @@ def print_support(tag, y):
     c = Counter(y); print(tag, dict(sorted(c.items(), key=lambda kv: kv[0])))
 
 
+#def save_results_csv(fold, curves_dir):
+#    os.makedirs(curves_dir, exist_ok=True)
+#    csv_path = os.path.join(curves_dir, f"cv_fold_{fold}_log.csv")
+#    logger = CSVLogger(csv_path, append=False)
+#    return logger, csv_path
+
+
 def run_scratch_cv_then_test(X_train: pd.DataFrame, y_train: np.ndarray,
                              X_val: pd.DataFrame, y_val: np.ndarray,
                              X_test: pd.DataFrame, y_test: np.ndarray,
@@ -352,9 +366,12 @@ def run_scratch_cv_then_test(X_train: pd.DataFrame, y_train: np.ndarray,
         wrapper = SherlockModel()
         wrapper.initialize_model_from_json(with_weights=True, model_id=MODEL_ID)
 
+        #curves_dir = os.path.join(out_dir, "cv_curves")
+        #callbacks, csv_path = save_results_csv(fold, curves_dir)
+
         t0 = time.perf_counter()
         # wrapper.fit expects (X_train, y_train, X_val, y_val)
-        wrapper.fit(X_tr, y_tr, X_va, y_va, model_id=f"retrained_sherlock_fold{fold}")
+        wrapper.fit(X_tr, y_tr, X_va, y_va, model_id=f"retrained_sherlock_fold{fold}", fold=fold)
         ft = time.perf_counter() - t0
 
         t1 = time.perf_counter()
@@ -369,6 +386,9 @@ def run_scratch_cv_then_test(X_train: pd.DataFrame, y_train: np.ndarray,
 
         print(f"[Scratch Fold {fold}/{K}] macroF1={cv_macro[-1]:.3f} | wF1={cv_weighted[-1]:.3f} | acc={cv_acc[-1]:.3f} "
               f"| fit {ft:.2f}s | infer {it:.2f}s")
+
+        for_fold_csv = os.path.join("/home/omadbek/projects/Sherlock/executable", f"cv_fold_{fold}.csv")
+        plot_from_csv(for_fold_csv, fold)
 
     def summarize(a):
         a = np.asarray(a, dtype=float)
@@ -392,7 +412,7 @@ def run_scratch_cv_then_test(X_train: pd.DataFrame, y_train: np.ndarray,
     wrapper_final.initialize_model_from_json(with_weights=True, model_id=MODEL_ID)
 
     print("Training scratch wrapper on full 80% (with 10% internal val)...")
-    wrapper_final.fit(X_tr, y_tr, X_va, y_va, model_id="retrained_sherlock_full80")
+    wrapper_final.fit(X_tr, y_tr, X_va, y_va, model_id="retrained_sherlock_full80", fold=11)
 
     start_inf = time.perf_counter()
     predicted_labels = wrapper_final.predict(X_test, model_id="retrained_sherlock_full80")
@@ -415,6 +435,37 @@ def run_scratch_cv_then_test(X_train: pd.DataFrame, y_train: np.ndarray,
     for inp, pred in zip(raw_inputs, predicted_labels[:len(raw_inputs)]):
         print(f"INPUT: {inp}")
         print(f"Predicted: {pred}\n")
+
+
+def plot_from_csv(csv_path, fold):
+    df = pd.read_csv(csv_path)  # columns: epoch, loss, categorical_accuracy, val_loss, val_categorical_accuracy, ...
+    epochs = np.arange(1, len(df) + 1)
+
+    # Loss
+    if {"loss","val_loss"}.issubset(df.columns):
+        fig = plt.figure()
+        plt.plot(epochs, df["loss"], label="loss")
+        plt.plot(epochs, df["val_loss"], label="val_loss")
+        vi = int(df["val_loss"].idxmin())
+        plt.scatter(epochs[vi], df["val_loss"].iloc[vi], s=50)
+        plt.title(f"Fold {fold} — Loss (best val @ epoch {epochs[vi]})")
+        plt.xlabel("Epoch"); plt.ylabel("Loss"); plt.grid(True); plt.legend()
+        fig.savefig(os.path.join("/home/omadbek/projects/Sherlock/executable", f"cv_fold{fold}_loss.png"),
+                    bbox_inches="tight")
+        plt.close(fig)
+
+    # Accuracy-like metric
+    if {"categorical_accuracy","val_categorical_accuracy"}.issubset(df.columns):
+        fig = plt.figure()
+        plt.plot(epochs, df["categorical_accuracy"], label="categorical_accuracy")
+        plt.plot(epochs, df["val_categorical_accuracy"], label="val_categorical_accuracy")
+        vi = int(df["val_categorical_accuracy"].idxmax())
+        plt.scatter(epochs[vi], df["val_categorical_accuracy"].iloc[vi], s=50)
+        plt.title(f"Fold {fold} — Categorical Accuracy (best val @ epoch {epochs[vi]})")
+        plt.xlabel("Epoch"); plt.ylabel("categorical_accuracy"); plt.grid(True); plt.legend()
+        fig.savefig(os.path.join("/home/omadbek/projects/Sherlock/executable", f"cv_fold{fold}_categorical_accuracy.png"),
+                    bbox_inches="tight")
+        plt.close(fig)
 
 def training_scratch(X_train, y_train, X_val, y_val, X_test, y_test, run_id, out_dir, data_dir):
     wrapper = SherlockModel()

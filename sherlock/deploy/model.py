@@ -19,6 +19,8 @@ from sherlock.deploy import helpers
 
 from typing import List, Tuple
 
+from tensorflow_core.python.keras.callbacks import CSVLogger
+
 
 class SherlockModel:
     def __init__(self):
@@ -29,7 +31,7 @@ class SherlockModel:
         self.model_files_directory = "../model_files/"
 
     def fit(
-        self, X_train: pd.DataFrame, y_train, X_val: pd.DataFrame, y_val, model_id: str
+        self, X_train: pd.DataFrame, y_train, X_val: pd.DataFrame, y_val, model_id: str, fold: int
     ):
         if model_id == "sherlock":
             raise ValueError(
@@ -56,7 +58,7 @@ class SherlockModel:
         y_train_cat = tf.keras.utils.to_categorical(y_train_int)
         y_val_cat = tf.keras.utils.to_categorical(y_val_int)
 
-        callbacks = [EarlyStopping(monitor="val_loss", patience=20)]
+        callbacks = [EarlyStopping(monitor="val_loss", patience=5), CSVLogger(f"cv_fold_{fold}.csv", append=False)]
 
         char_model_input, char_model = self._build_char_submodel(X_train_char.shape[1])
         word_model_input, word_model = self._build_word_submodel(X_train_word.shape[1])
@@ -97,7 +99,7 @@ class SherlockModel:
                 y_val_cat,
             ),
             callbacks=callbacks,
-            epochs=200,
+            epochs=40,
             batch_size=32,
         )
 
