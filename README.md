@@ -2,9 +2,9 @@
 
 This repository extends the original Sherlock project with additional scripts and notebooks that support fine-tuning, custom preprocessing, and baseline approaches (tree-based models and rule-based systems). Below is an overview of the added components:
 
-## `sherlock-project/executable/`
+`sherlock-project/executable/`
 
-This directory contains the main scripts used in the project.
+Contains the main scripts used in the project:
 
 - **`data-preprocessing.py`**  
   Script for preprocessing datasets into the feature representation required by the Sherlock model.  
@@ -12,7 +12,7 @@ This directory contains the main scripts used in the project.
 
 - **`approachOne.py`**  
   Main training script for Sherlock.  
-  It supports two modes:
+  It supports two modes:  
   1. Fine-tuning the original Sherlock model on a new dataset.  
   2. Training a model from scratch on a custom dataset.  
 
@@ -20,9 +20,9 @@ This directory contains the main scripts used in the project.
 
 ---
 
-## `sherlock-project/sherlock_data_preprocessing/`
+`sherlock-project/sherlock_data_preprocessing/`
 
-This directory contains notebooks implementing baseline approaches for semantic type detection.
+Contains notebooks implementing baseline approaches for semantic type detection:
 
 - **`random-forest-custom-data.ipynb`**  
   Notebook that applies tree-based models (Random Forest, Extra Trees, etc.) to a dataset for column type classification.  
@@ -31,6 +31,8 @@ This directory contains notebooks implementing baseline approaches for semantic 
 - **`rule-based-regex.ipynb`**  
   Notebook that demonstrates a simple rule-based system using regular expressions.  
   It classifies columns by matching patterns such as IDs, dates, and email formats, serving as a lightweight baseline for certain semantic types.
+
+---
 
 ----- Original Sherlock Readme ------
 
