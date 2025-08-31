@@ -1,3 +1,39 @@
+# Extensions and Modifications in This Repository
+
+This repository extends the original Sherlock project with additional scripts and notebooks that support fine-tuning, custom preprocessing, and baseline approaches (tree-based models and rule-based systems). Below is an overview of the added components:
+
+## `sherlock-project/executable/`
+
+This directory contains the main scripts used in the project.
+
+- **`data-preprocessing.py`**  
+  Script for preprocessing datasets into the feature representation required by the Sherlock model.  
+  It handles data cleaning, transformation, and feature extraction so that the processed data can be used for training or fine-tuning.
+
+- **`approachOne.py`**  
+  Main training script for Sherlock.  
+  It supports two modes:
+  1. Fine-tuning the original Sherlock model on a new dataset.  
+  2. Training a model from scratch on a custom dataset.  
+
+  The script manages data loading, model initialization, training, evaluation, and saving of results.
+
+---
+
+## `sherlock-project/sherlock_data_preprocessing/`
+
+This directory contains notebooks implementing baseline approaches for semantic type detection.
+
+- **`random-forest-custom-data.ipynb`**  
+  Notebook that applies tree-based models (Random Forest, Extra Trees, etc.) to a dataset for column type classification.  
+  Useful as a baseline comparison against deep learning models.
+
+- **`rule-based-regex.ipynb`**  
+  Notebook that demonstrates a simple rule-based system using regular expressions.  
+  It classifies columns by matching patterns such as IDs, dates, and email formats, serving as a lightweight baseline for certain semantic types.
+
+----- Original Sherlock Readme ------
+
 # Sherlock: code, data, and trained model.
 
 Sherlock is a deep-learning approach to semantic data type detection, i.e. labeling tables with column types such as `name`, `address`, etc. This is helpful for, among others, data validation, processing and integration. This repository provides data and code to guide usage of Sherlock, retraining the model, and replication of results. Visit https://sherlock.media.mit.edu for more background on this project.
