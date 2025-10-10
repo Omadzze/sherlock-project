@@ -1,0 +1,6 @@
+name: sherlock
+channels:
+  - defaults
+dependencies:
+  - python=3.7
+prefix: /home/omadbek/.conda/envs/sherlock
